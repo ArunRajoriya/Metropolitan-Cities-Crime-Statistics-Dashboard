@@ -1,0 +1,23 @@
+Category,Crime Head,Cases of Crimes Committed against - Foreign Tourists,Cases of Crimes Committed against - Other Foreigners,Cases of Crimes Committed against - Total Foreigners
+IPC,Murder,3,4,7
+IPC,Culpable Homicide not amounting to Murder,0,1,1
+IPC,Attempt to Commit Murder/Culpable Homicide,6,0,6
+IPC,Simple Hurt,4,11,15
+IPC,Grievous Hurt,0,0,0
+IPC,Assault on Women with Intent to Outrage her Modesty,5,0,5
+IPC,Kidnapping and Abduction,2,5,7
+IPC,Human Trafficking,10,3,13
+IPC,Rape,14,2,16
+IPC,Theft,36,16,52
+IPC,Extortion,0,0,0
+IPC,Robbery,2,2,4
+IPC,Dacoity,0,0,0
+IPC,Cheating,7,7,14
+IPC,Forgery,1,0,1
+IPC,Insult to the Modesty of Women,0,0,0
+IPC,Other IPC Crimes,9,9,18
+Total (A),Total (A),99,60,159
+SLL,Immoral Traffic (Prevention) Act,4,2,6
+SLL,Other SLL Crimes,16,10,26
+Total (B),Total (B),20,12,32
+Total (A+B),Total (A+B),119,72,191
