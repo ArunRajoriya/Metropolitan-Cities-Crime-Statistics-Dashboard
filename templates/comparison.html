@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}City Comparison{% endblock %}
+
+{% block content %}
+
+<section class="page-title">
+    <h1>City Comparison Analysis</h1>
+    <h2>Compare crime statistics between two cities</h2>
+</section>
+
+<section class="filter-card">
+
+    <label>Year</label>
+    <select id="yearFilter">
+        <option value="all">All</option>
+        <option value="2016">2016</option>
+        <option value="2019">2019</option>
+        <option value="2020">2020</option>
+    </select>
+
+    <label>City 1</label>
+    <select id="city1"></select>
+
+    <label>City 2</label>
+    <select id="city2"></select>
+
+    <label>Age</label>
+    <select id="ageFilter">
+        <option value="all">All</option>
+        <option value="18-30">18–30</option>
+        <option value="30-45">30–45</option>
+        <option value="45-60">45–60</option>
+        <option value="60 years and above">60+</option>
+    </select>
+
+    <label>Gender</label>
+    <select id="genderFilter">
+        <option value="all">All</option>
+        <option value="male">Male</option>
+        <option value="female">Female</option>
+    </select>
+
+</section>
+
+<section class="analysis-section">
+    <div class="analysis-card-large">
+        <h3>City Comparison</h3>
+        <canvas id="comparisonChart"></canvas>
+    </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/comparison.js') }}"></script>
+{% endblock %}

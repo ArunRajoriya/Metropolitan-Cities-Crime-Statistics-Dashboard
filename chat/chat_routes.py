@@ -21,18 +21,41 @@ from services.response_formatter import (
 )
 from services.advanced_query_processor import advanced_processor
 
-# Add caching enhancement
+# Add productivity enhancements
 from services.cache_manager import chatbot_cache
+from services.smart_preprocessor import smart_preprocessor
+from services.conversation_context import conversation_context
+from services.error_recovery import error_recovery
+from services.chatbot_analytics import chatbot_analytics
 
 chat_bp = Blueprint("chatbot", __name__)
 
-def create_cached_response(response_data, cache_key_data, start_time):
-    """Helper function to add timing and caching to responses"""
-    response_data['response_time'] = f"{time.time() - start_time:.2f}s"
+def create_cached_response(response_data, cache_key_data, start_time, session_id, original_message, extracted_data):
+    """Helper function to add timing, caching, and analytics to responses"""
+    response_time = time.time() - start_time
+    response_data['response_time'] = f"{response_time:.2f}s"
+    
+    # Determine success based on response type
+    is_success = response_data.get('type') not in ['error', 'fallback']
     
     # Cache successful responses (not errors or greetings)
     if response_data.get('type') not in ['error', 'fallback', 'clarification', 'greeting']:
         chatbot_cache.set(cache_key_data, response_data)
+    
+    # Log analytics
+    chatbot_analytics.log_query(
+        original_message, extracted_data, response_data,
+        response_time, session_id, success=is_success
+    )
+    
+    # Add to conversation context
+    conversation_context.add_interaction(session_id, original_message, response_data, extracted_data)
+    
+    # Add follow-up suggestions for successful queries
+    if is_success:
+        response_data['follow_up_suggestions'] = conversation_context.suggest_followup_questions(
+            session_id, response_data
+        )
     
     return jsonify(response_data)
 
@@ -69,13 +92,20 @@ VALID_CRIMES = [
 @chat_bp.route("/chat", methods=["POST"])
 def chat():
     start_time = time.time()
-    message = request.json.get("message", "").strip()
+    original_message = request.json.get("message", "").strip()
+    
+    # Get session ID for context management
+    session_id = conversation_context.get_session_id(request)
+    
+    # Step 1: Preprocess query for typo correction and enhancement
+    preprocessed = smart_preprocessor.preprocess_query(original_message)
+    message = preprocessed['enhanced']
     message_lower = message.lower()
     
     # Handle greetings
     greetings = ["hi", "hello", "hey"]
     if message_lower in greetings:
-        return jsonify({
+        greeting_response = {
             "type": "greeting",
             "summary": "Hello! I'm your intelligent crime analytics assistant. I can help you with:",
             "capabilities": [
@@ -86,11 +116,14 @@ def chat():
                 "Top/bottom city rankings",
                 "Government and foreign crime data"
             ],
-            "example": "Try asking: 'Compare Delhi and Mumbai arrests in 2020' or 'Show me the trend for Bangalore from 2016 to 2020'",
-            "response_time": f"{time.time() - start_time:.2f}s"
-        })
+            "example": "Try asking: 'Compare Delhi and Mumbai arrests in 2020' or 'Show me the trend for Bangalore from 2016 to 2020'"
+        }
+        return create_cached_response(greeting_response, {}, start_time, session_id, original_message, {})
 
     structured = llm_extract(message) or {}
+    
+    # Step 2: Enhance with conversation context for follow-up queries
+    structured = conversation_context.get_context_enhanced_query(session_id, message, structured)
     
     # Check cache first for performance boost
     cache_key_data = {
@@ -105,22 +138,35 @@ def chat():
     if cached_response:
         cached_response['cached'] = True
         cached_response['response_time'] = f"{time.time() - start_time:.2f}s"
+        
+        # Log analytics for cache hit
+        chatbot_analytics.log_cache_hit(hit=True)
+        chatbot_analytics.log_query(
+            original_message, structured, cached_response, 
+            time.time() - start_time, session_id, success=True
+        )
+        
+        # Add follow-up suggestions
+        cached_response['follow_up_suggestions'] = conversation_context.suggest_followup_questions(
+            session_id, cached_response
+        )
+        
         return jsonify(cached_response)
+    
+    # Log cache miss
+    chatbot_analytics.log_cache_hit(hit=False)
     
     # Early year validation - check if user mentioned years that don't exist
     extracted_years = structured.get("years", [])
     if extracted_years:
         invalid_years = [str(y) for y in extracted_years if str(y) not in crime_data]
         if invalid_years:
-            return jsonify({
-                "type": "error",
-                "summary": f"Data not available for {', '.join(invalid_years)}. Available years: 2016, 2019, 2020.",
-                "suggestions": [
-                    f"Try using 2020 instead: '{message.replace(invalid_years[0], '2020')}'",
-                    "Ask 'What years are available?'",
-                    "Use available years: 2016, 2019, or 2020"
-                ]
-            })
+            error_response = error_recovery.recover_from_error(
+                'year_not_available', original_message, structured
+            )
+            error_response['type'] = 'error'
+            error_response['summary'] = f"Data not available for {', '.join(invalid_years)}. Available years: 2016, 2019, 2020."
+            return create_cached_response(error_response, cache_key_data, start_time, session_id, original_message, structured)
     
     # Validate and auto-correct the query
     structured = intelligent_handler.validate_and_correct_query(structured)
@@ -471,26 +517,20 @@ def chat():
 
         # If no cities found at all
         if not results:
-            suggestions = intelligent_handler.get_contextual_suggestions(structured, "city_not_found")
-            return jsonify({
-                "type": "error",
-                "summary": "Cities not found in the database.",
-                "suggestions": suggestions
-            })
+            error_response = error_recovery.recover_from_error(
+                'city_not_found', original_message, structured
+            )
+            return create_cached_response(error_response, cache_key_data, start_time, session_id, original_message, structured)
         
         # If only one city found when two were requested
         if len(results) == 1 and len(city_list) >= 2:
             found_city = list(results.keys())[0]
-            return jsonify({
-                "type": "error",
-                "summary": f"Found data for {found_city}, but could not find: {', '.join(not_found_cities)}",
-                "suggestions": [
-                    f"Try checking the spelling of '{not_found_cities[0]}'",
-                    "Use the exact city name as it appears in the dataset",
-                    f"Example: 'Compare {found_city} with Mumbai'"
-                ],
-                "partial_data": {found_city: results[found_city]}
-            })
+            error_response = error_recovery.recover_from_error(
+                'city_not_found', original_message, structured, 
+                context={'found_cities': [found_city], 'not_found': not_found_cities}
+            )
+            error_response['partial_data'] = {found_city: results[found_city]}
+            return create_cached_response(error_response, cache_key_data, start_time, session_id, original_message, structured)
 
         # Generate detailed insight
         context = {
@@ -634,12 +674,10 @@ def chat():
                 results[yr] = total
 
         if not results:
-            suggestions = intelligent_handler.get_contextual_suggestions(structured, "city_not_found")
-            return jsonify({
-                "type": "error",
-                "summary": "City not found in the database.",
-                "suggestions": suggestions
-            })
+            error_response = error_recovery.recover_from_error(
+                'city_not_found', original_message, structured
+            )
+            return create_cached_response(error_response, cache_key_data, start_time, session_id, original_message, structured)
 
         # Add gender analysis if requested
         if "gender" in query_types or "analysis" in query_types:
@@ -903,23 +941,43 @@ def chat():
         })
 
     # ================= FALLBACK =================
-    suggestions = intelligent_handler.get_contextual_suggestions(structured, "general")
+    # Try error recovery for unclear queries
+    error_response = error_recovery.recover_from_error(
+        'ambiguous_query', original_message, structured
+    )
+    error_response['type'] = 'fallback'
+    error_response['help'] = "Try being more specific about the city, year, or type of information you need."
     
-    response = {
-        "type": "fallback",
-        "summary": "I couldn't fully understand your query. Here are some suggestions:",
-        "suggestions": suggestions,
-        "extracted_info": {
-            "cities": structured.get("cities", []),
-            "years": structured.get("years", []),
-            "intent": structured.get("intent", "unknown")
-        },
-        "help": "Try being more specific about the city, year, or type of information you need.",
-        "response_time": f"{time.time() - start_time:.2f}s"
-    }
-    
-    # Cache successful responses (not errors or greetings)
-    if response.get('type') not in ['error', 'fallback', 'clarification', 'greeting']:
-        chatbot_cache.set(cache_key_data, response)
-    
-    return jsonify(response)
+    return create_cached_response(error_response, cache_key_data, start_time, session_id, original_message, structured)
+
+
+
+# ================= ANALYTICS ENDPOINTS =================
+
+@chat_bp.route("/chat/analytics", methods=["GET"])
+def get_analytics():
+    """Get chatbot performance analytics"""
+    return jsonify(chatbot_analytics.get_performance_summary())
+
+
+@chat_bp.route("/chat/analytics/recommendations", methods=["GET"])
+def get_recommendations():
+    """Get optimization recommendations"""
+    return jsonify(chatbot_analytics.get_optimization_recommendations())
+
+
+@chat_bp.route("/chat/autocomplete", methods=["POST"])
+def autocomplete():
+    """Get autocomplete suggestions for partial queries"""
+    partial_query = request.json.get("query", "").strip()
+    suggestions = smart_preprocessor.get_autocomplete_suggestions(partial_query)
+    return jsonify({"suggestions": suggestions})
+
+
+@chat_bp.route("/chat/context/clear", methods=["POST"])
+def clear_context():
+    """Clear conversation context for a session"""
+    session_id = conversation_context.get_session_id(request)
+    if session_id in conversation_context.sessions:
+        del conversation_context.sessions[session_id]
+    return jsonify({"message": "Context cleared successfully"})

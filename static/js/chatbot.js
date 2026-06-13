@@ -108,8 +108,8 @@ async function sendAssistantQuery() {
         appendEnhancedResponse(data);
 
         // Show follow-up suggestions if available
-        if (data.followup_suggestions && data.followup_suggestions.length > 0) {
-            showFollowupSuggestions(data.followup_suggestions);
+        if (data.follow_up_suggestions && data.follow_up_suggestions.length > 0) {
+            showFollowupSuggestions(data.follow_up_suggestions);
         }
 
         // Show autocomplete suggestions for next query

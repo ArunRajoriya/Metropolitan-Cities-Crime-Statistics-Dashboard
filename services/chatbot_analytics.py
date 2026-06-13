@@ -31,8 +31,8 @@ class ChatbotAnalytics:
             'unique_users': set()
         })
         
-        self.query_patterns = defaultdict(int)
-        self.error_patterns = defaultdict(int)
+        self.query_patterns = Counter()
+        self.error_patterns = Counter()
     
     def log_query(self, query, extracted_data, response, response_time, session_id, success=True):
         """Log query metrics"""
